@@ -1,0 +1,161 @@
+---
+title: "Applied Statistics. HW1"
+author: "Rutkovskaya Ekaterina"
+date: "2024-03-29"
+output: html_document
+---
+<style type="text/css">
+  body{
+  font-size: 12pt;
+}
+</style>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Ordination and community analysis
+
+
+```{r, message=FALSE, warning=FALSE}
+library(readxl)
+library(tidyr)
+library(dplyr)
+library(broom)
+library(ggmap)
+library(ggvegan)
+library(vegan)
+library(ggplot2)
+
+data("BCI")
+data('BCI.env')
+```
+
+### EDA
+
+Counting how many species in each of 50 tree plots 
+```{r, message=FALSE, warning=FALSE}
+BCI$Diversity <- rowSums(BCI > 0)
+
+BCI %>% ggplot(aes(x=rownames(BCI), y=BCI$Diversity, fill=factor(BCI.env$Habitat))) +
+  xlab("Tree plots") + ylab("Number of species") + labs(fill = "Habitat") +
+  geom_col() + coord_flip() + scale_fill_brewer(palette = "Pastel1")
+```
+
+
+Finding the lead tree species in each plot
+```{r, message=FALSE, warning=FALSE}
+max_col_index <- max.col(BCI[, c(0:225)])
+sp_name <- colnames(BCI)[max_col_index]
+BCI$Indiv_number <- apply(BCI[, -ncol(BCI)], 1, max)
+BCI$Dominant_sp <-sp_name
+
+BCI %>% ggplot(aes(x = factor(row.names(BCI)), fill = factor(Dominant_sp), y = Indiv_number)) +
+  xlab("Tree plots") + ylab("Number of individuals") + labs(fill = "Species") +
+  geom_dotplot(binaxis = "y", stackdir = "center", position = "dodge", binwidth = 5) + scale_fill_brewer(palette = "Set2")
+```
+
+Data preparation
+```{r, message=FALSE, warning=FALSE}
+BCI[nrow(BCI) + 1,] = apply(BCI, 2, max)
+low_number<- as.data.frame(lapply(BCI[, BCI[51, ] < 20], as.integer))
+low_number$Total <-rowSums(low_number)
+BCI<-as.data.frame(lapply(BCI[, BCI[51, c(1:225)] > 20], as.integer))
+BCI$Other <- low_number$Total
+BCI<-BCI[c(1:50), ]
+```
+
+nMDS
+```{r, message=FALSE, warning=FALSE}
+ordination <- metaMDS(BCI, dist = "bray", autotransform = FALSE)
+autoplot(ordination)
+```
+
+```{r, message=FALSE, warning=FALSE}
+fort <-fortify(ordination)
+ggplot()+
+  geom_point(data=subset(fort, score =='sites'),
+             mapping = aes(x=NMDS1, y=NMDS2),
+             colour='purple',
+             alpha=0.5)+
+  geom_segment(data=subset(fort, score='species'),
+               mapping=aes(x=0, y=0, xend=NMDS1, yend=NMDS2),
+               arrow=arrow(length = unit(0.015, 'npc'),
+                           type='closed'),
+               colour='darkgray',
+               size=0,
+               alpha=0)+
+  geom_text(data=subset(fort, score='species'),
+            mapping=aes(label=label, x=NMDS1*1.1, y=NMDS2*1.1),
+            alpha=0)+
+  geom_abline(intercept = 0, slope = 0, linetype='dashed', size=0.8, colour='gray')+
+  geom_vline(aes(xintercept=0), linetype='dashed', size=0.8, colour='gray')+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = 'black'))
+```
+
+In summary we can see that non of the environmental factors are equally distributed, so we can use Habitat as a factor to explore. 
+```{r, message=FALSE, warning=FALSE}
+summary(BCI.env)
+```
+
+We can see the clear separation between OldSlope and OldHigh populations:
+```{r, message=FALSE, warning=FALSE}
+adonis2(BCI~Habitat, data=BCI.env)
+ggplot()+
+  geom_point(data=subset(fort, score =='sites'),
+             mapping = aes(x=NMDS1, y=NMDS2, colour=BCI.env$Habitat),
+             alpha=0.5)+ 
+  geom_segment(data=subset(fort, score='species'),
+               mapping=aes(x=0, y=0, xend=NMDS1, yend=NMDS2),
+               arrow=arrow(length = unit(0.015, 'npc'),
+                           type='closed'),
+               colour='darkgray',
+               size=0,
+               alpha=0)+
+  geom_text(data=subset(fort, score='species'),
+            mapping=aes(label=label, x=NMDS1*1.1, y=NMDS2*1.1),
+            alpha=0)+
+  geom_abline(intercept = 0, slope = 0, linetype='dashed', size=0.8, colour='gray')+
+  geom_vline(aes(xintercept=0), linetype='dashed', size=0.8, colour='gray')+
+  theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.background = element_blank(),
+      axis.line = element_line(colour = 'black'),
+      legend.position = c(0.8, 0.2))+
+  scale_color_discrete("Habitat")
+```
+
+Interpretation of ordination
+```{r, message=FALSE, warning=FALSE}
+fit <- envfit(ordination, BCI.env, perm = 999)
+fit$factors
+fit$vectors
+
+pal_sh <- c(1, 2)
+ordiplot(ordination, type = "n")
+points(ordination, col = BCI.env$Habitat, pch = pal_sh[BCI.env$Stream])
+plot(fit)
+
+```
+
+We can see some correlation between Environmental Heterogeneity and UTM coordinates of the trees, but there is almost negative correlation between E-W and N-S distribution of species. The rest factors are not fitted well. 
+
+
+All three factors have almost linear relationship to the data, but North-South distribution tends more to non-linear way.
+```{r, message=FALSE, warning=FALSE}
+os_EH <- ordisurf(ordination, BCI.env$EnvHet, method = "REML", main="Envitonmental Heterogenity", xlab="NMDS1", ylab="NMDS2", bubble=5)
+summary(os_EH)
+
+
+os_coord_EW<-ordisurf(ordination, BCI.env$UTM.EW, method = "REML",  main="East-West coordinates", xlab="NMDS1", ylab="NMDS2", bubble=5)
+summary(os_coord_EW)
+
+
+os_coord_NS<-ordisurf(ordination, BCI.env$UTM.NS, method = "REML",  main="North-South coordinates", xlab="NMDS1", ylab="NMDS2", bubble=5)
+summary(os_coord_NS)
+
+```
