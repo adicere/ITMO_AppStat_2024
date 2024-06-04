@@ -1,0 +1,75 @@
+---
+title: "AppStat_HW4"
+author: "Rutkovskaya Ekaterina"
+date: "2024-05-14"
+output: html_document
+---
+```{r, message=FALSE, warning=FALSE}
+library(corrplot)
+library(readxl)
+library(vegan)
+library(ggvegan)
+library(VIM)
+library(dplyr)
+```
+
+```{r, message=FALSE, warning=FALSE}
+fauna <- read_excel('C:/Users/rutko/Downloads/Grazing_Magierowski_et_al_2015.xls', sheet = 'fauna')
+env <- read_excel('C:/Users/rutko/Downloads/Grazing_Magierowski_et_al_2015.xls', sheet = 'env')
+coord <- read_excel('C:/Users/rutko/Downloads/Grazing_Magierowski_et_al_2015.xls', sheet = 'coord')
+raw <- read_excel('C:/Users/rutko/Downloads/Grazing_Magierowski_et_al_2015.xls', sheet = 'raw', skip=1)
+coord<- coord %>% 
+  filter(SITE %in% env$SITE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+colnames(env) <- c("SITE","Abstraction","Regulation","Grazing","Fines","Temperature","Conductivity","AvgTurbidity","pH",
+                   "Alkalinity","NitrateNitrite","DRP","N_total","P_total","AvgShading","AvgAlgae","Chl","GrazingRank")
+data_graze <- merge(env,fauna)
+data_graze <- na.omit(data_graze)
+corrplot(cor(data_graze[,2:17]))
+```
+
+```{r, message=FALSE, warning=FALSE}
+env <- data_graze[,1:18]
+fauna <- data_graze[, 19:length(data_graze)]
+```
+
+```{r, message=FALSE, warning=FALSE}
+boxplot(env[,2:17], las=2)
+env_lognorm <- scale(log(env[,2:17]+1), scale = FALSE)
+boxplot(env_lognorm, las=2)
+data_graze[,2:17] <- env_lognorm
+coord <- inner_join(coord, env, by = "SITE")
+```
+
+```{r, message=FALSE, warning=FALSE}
+graze_cca <- cca(data_graze[,19:length(data_graze)] ~ Abstraction + Grazing + Fines + Temperature + Conductivity + 
+                   AvgTurbidity + pH + N_total + P_total + AvgShading + Chl, data = data_graze)
+
+vif.cca(graze_cca)
+summary(graze_cca)
+```
+
+```{r, message=FALSE, warning=FALSE}
+screeplot(graze_cca,  bstick = TRUE)
+autoplot(graze_cca, scaling = "sites")
+```
+
+```{r, message=FALSE, warning=FALSE}
+plot(graze_cca, scaling = "sites", 
+     main = "scaling 1")
+```
+
+```{r, message=FALSE, warning=FALSE}
+plot(graze_cca, scaling = 2, 
+     display = c("species", "cn"), 
+     main = "scaling 2")
+```
+
+```{r, message=FALSE, warning=FALSE}
+anova(graze_cca)
+anova(graze_cca, by="term")
+```
+
+Abstraction, temperature, conductivity, AvgTurbidity, and P_total have significant p-values, indicating that they have a strong influence on the response variables. Factors like Grazing, Fines, pH, and N_total do not show significant influence in this analysis.

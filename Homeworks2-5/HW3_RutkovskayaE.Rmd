@@ -1,0 +1,164 @@
+---
+title: "Applied Statistics. HW3"
+author: "Rutkovskaya Ekaterina"
+date: "2024-05-14"
+output: html_document
+---
+
+```{r, message=FALSE, warning=FALSE}
+library(readxl)
+library(vegan)
+library(ggplot2)
+library(plotly)
+library(impute)
+library(factoextra)
+library(psych)
+library(ggforce)
+library(rstatix)
+library(ggsignif)
+library(gridExtra)
+```
+
+## Data uploading processing
+```{r, message=FALSE, warning=FALSE}
+df <- read_excel("C:/Users/rutko/Downloads/Sleepy lizard.xlsx")
+df <- df %>% 
+  select(Treatment, Habitat, Connectivity, Tot_WBC, Het_ABS, Lym_ABS, `H:L Ratio`, Mon_ABS, OthG_ABS, LBSI)
+
+df$Treatment <-  as.factor(df$Treatment)
+df$Habitat <- as.factor(df$Habitat)
+df$Connectivity <-  as.factor(df$Connectivity)
+```
+
+## EDA
+```{r, message=FALSE, warning=FALSE}
+colSums(is.na(df))
+```
+
+```{r, message=FALSE, warning=FALSE}
+blood_parameters <-  df[, 4:10]
+pairs(blood_parameters, pch = 19, cex=0.5)
+```
+
+```{r, message=FALSE, warning=FALSE}
+plot_with_significance <- function(data, column_name, y_label) {
+  ggplot(data, aes(x = Treatment, y = !!sym(column_name), fill = Treatment)) +
+    geom_boxplot() +
+    geom_signif(comparisons = list(c("1", "2")), 
+                map_signif_level = TRUE, 
+                test = "t.test") +
+    labs(y = y_label, title = paste(y_label)) +
+    theme_minimal()
+}
+
+columns_to_plot <- colnames(blood_parameters)
+labels <- colnames(blood_parameters)
+
+
+plots <- lapply(1:length(columns_to_plot), function(i) {
+  plot_with_significance(df, columns_to_plot[i], labels[i])
+})
+
+grid.arrange(grobs = plots, ncol = 2)
+```
+
+Let's check data distribution
+```{r, message=FALSE, warning=FALSE}
+boxplot(blood_parameters)
+```
+
+Looks like we need some normalization
+```{r, message=FALSE, warning=FALSE}
+blood_parameters <- as.data.frame(scale(log(blood_parameters+1)))
+normalized_data <- cbind(df[, 1:3], blood_parameters)
+boxplot(blood_parameters)
+```
+
+That's better
+
+```{r, message=FALSE, warning=FALSE}
+pca_df <- prcomp(blood_parameters)$x %>% 
+  as.data.frame() %>%
+  select(PC1, PC2) %>% 
+  mutate(Treatment = normalized_data$Treatment,
+         Habitat = normalized_data$Habitat)
+
+ggplot(pca_df, aes(x=PC1, y=PC2, shape=Treatment, col=Habitat))+
+  geom_point(size=3)+
+  geom_mark_ellipse(aes(col = Treatment, fill=Treatment))
+```
+
+As expected, we have two main classes. Let's find out how they differ.
+
+## Checking dispersion
+```{r, message=FALSE, warning=FALSE}
+distances <- vegdist(blood_parameters, method  = "euclidean")
+PCO_treat<- betadisper(distances, normalized_data$Treatment)
+plot(PCO_treat)
+anova(PCO_treat)
+```
+
+```{r, message=FALSE, warning=FALSE}
+distances <- vegdist(blood_parameters, method  = "euclidean")
+PCO_hab<- betadisper(distances, normalized_data$Habitat)
+plot(PCO_hab)
+anova(PCO_hab)
+```
+
+```{r, message=FALSE, warning=FALSE}
+distances <- vegdist(blood_parameters, method  = "euclidean")
+PCO_con<- betadisper(distances, normalized_data$Connectivity)
+plot(PCO_con)
+anova(PCO_con)
+```
+
+Variances in groups are significantly different, so alongside perMANOVA I'll use redundancy analysis
+
+## Blood composition of different landscapes 
+```{r, message=FALSE, warning=FALSE}
+permanova_treat <- adonis2(blood_parameters ~ normalized_data$Treatment, data = normalized_data, permutations = 999, method = "euclidean")
+print(permanova_treat)
+```
+
+```{r, message=FALSE, warning=FALSE}
+pcoa_treat <- capscale(blood_parameters ~ normalized_data$Treatment, distance = "euclidean")
+anova(pcoa_treat, by = "term", permutations = 999)
+```
+
+## Blood composition of different habitats
+
+```{r, message=FALSE, warning=FALSE}
+modified_blood <- blood_parameters%>% filter(normalized_data$Treatment == 2)
+habitats <- normalized_data[normalized_data$Treatment == 2,]$Habitat
+permanova_hab<-adonis2(modified_blood ~ habitats, method = "euclidean")
+print(permanova_hab)
+```
+
+```{r, message=FALSE, warning=FALSE}
+pcoa_hab <- capscale(modified_blood ~ habitats, distance = "euclidean")
+anova(pcoa_hab, by = "term", permutations = 999)
+```
+
+## Blood composition of different connectivity
+```{r, message=FALSE, warning=FALSE}
+connectivity <- subset(normalized_data, Treatment == 2)$Connectivity
+permanova_con<-adonis2(modified_blood ~ connectivity, method = "euclidean")
+print(permanova_con)
+```
+
+```{r, message=FALSE, warning=FALSE}
+pcoa_con <- capscale(modified_blood ~ connectivity, distance = "euclidean")
+anova(pcoa_con, by = "term", permutations = 999)
+```
+
+## Task 2
+```{r, message=FALSE, warning=FALSE}
+permanova_multi<-adonis2(modified_blood~ connectivity + habitats, method = "euclidean")
+print(permanova_multi)
+```
+
+```{r, message=FALSE, warning=FALSE}
+pcoa_multi <- capscale(modified_blood ~ connectivity + habitats, distance = "euclidean")
+anova(pcoa_multi, by = "term", permutations = 999)
+```
+Two tests (perMANOVA and db-RDA) showed the same results: treatment is only significant factor that influences blood composition of lizards. Habitat and connectivity nor them both have no significant effect on lizards.

@@ -1,0 +1,83 @@
+---
+title: "HW5"
+author: "Rutkovskaya Ekaterina"
+date: "2024-06-02"
+output: html_document
+---
+## Data uploading
+```{r, message=FALSE, warning=FALSE}
+library(ade4)
+library(readxl)
+library(vegan)
+library(ggplot2)
+library(plotly)
+library(impute)
+library(factoextra)
+library(psych)
+library(ggforce)
+library(rstatix)
+data(doubs)
+fish<- doubs$fish
+env <- doubs$env
+coord<-doubs$xy
+```
+
+## EDA
+
+After some data exploring I noticed that not all sites have fish, so I decided to remove this sites
+```{r, message=FALSE, warning=FALSE}
+keep <- apply(fish, 1, sum) > 0
+fish <- fish[keep, ]
+env <- env[keep, ]
+coord <- coord[keep, ]
+```
+
+## CCA
+
+Now let's perform CCA for all environmental factors
+```{r, message=FALSE, warning=FALSE}
+cca_env <- cca(fish ~ ., env)
+vif.cca(cca_env)
+```
+Variance inflation factor for distance (dfs) is too high, so let's remove this factor 
+
+```{r, message=FALSE, warning=FALSE}
+no_dfs<-env[,2:11]
+cca_env <- cca(fish ~ ., no_dfs)
+vif.cca(cca_env)
+```
+Now the factors are okay and I can continue analysis
+
+```{r, message=FALSE, warning=FALSE}
+summary(cca_env)
+```
+
+About 70% of the total variance is explained by the environmental variables, which is pretty good, and now I can plot the canonical axes
+
+```{r, message=FALSE, warning=FALSE}
+plot(cca_env, scaling = 1, 
+     main = 'Biplot with Eucledian distance')
+```
+
+```{r, message=FALSE, warning=FALSE}
+plot(cca_env, scaling = 2, 
+     display = c("species", "cn"), 
+     main = "Biplot with species-focused scaling")
+```
+
+On biplots I see that the most species are influenced by stream flow, hardness of water and nitrogen levels. Also there are two separate groups: Thymallus thymallus (Thth), Cottus gobio (Cogo) and Telestes soufia agassizi (Teso) are more present in high oxygen environment; Phoxinus phoxinus (Phph), Nemacheilus barbatulus (Nebo) and Salmo trutta fario (Satr) prefer the high slope and altitude places.   
+
+```{r, message=FALSE, warning=FALSE}
+anova(cca_env)
+```
+
+The p-value for the model is very high, so all the environmental variables collectively explain a significant amount of the variation in the fish species data.
+
+Now let's find out which of the factors is the most influential
+
+```{r, message=FALSE, warning=FALSE}
+anova(cca_env, by="term")
+```
+
+Looks like the altitude and dissolved oxygen are two most significant predictors of fish community structure. Flow, pH, total hardness of water and phosphates concentration influence the community too. 
+

@@ -1,0 +1,171 @@
+---
+title: "Clusterization"
+author: "Rutkovskaya Ekaterina"
+date: "2024-05-14"
+output: html_document
+---
+
+## Uploading data
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyr)
+library(dplyr)
+library(vegan)
+library(ggplot2)
+library(gridExtra)
+library(ape)
+library(pvclust)
+library(golubEsets)
+library(umap)
+library(clusterProfiler)
+library(boot)
+
+require(golubEsets)
+data(Golub_Merge)
+golub <- data.frame(Golub_Merge)[1:7129]
+```
+
+Let's have a look at data values distribution
+```{r data-processing, message=FALSE, warning=FALSE}
+golub %>%
+  colMeans() %>%
+  as.data.frame() %>%
+  ggplot(aes(x = .)) +
+  geom_density(fill = "#69b3a2", alpha = 0.8) +
+  labs(x = "Mean Values", y = "Density") +
+  theme_minimal()
+```
+
+Clearly, the data needs some normalization, to do that I'm gonna use range normalization method. 
+```{r normalization, message=FALSE, warning=FALSE}
+normalize <- function(x) {
+  (x - min(x)) / (max(x) - min(x))
+  }
+normalized_df <- as.data.frame(lapply(golub, normalize))
+
+normalized_df %>%
+  colMeans() %>%
+  as.data.frame() %>%
+  ggplot(aes(x = .)) +
+  geom_density(fill = "#19E1CF", alpha = 0.8) +
+  labs(x = "Mean Values", y = "Density") +
+  theme_minimal()
+```
+
+## Distance metrics
+
+```{r euclidean, message=FALSE, warning=FALSE}
+dist_eu <- vegdist(normalized_df, method = "euclidean")
+dist_eu %>%
+  data.frame() %>% 
+  ggplot(aes(x = .)) +
+  geom_density(fill = "#C766F1", alpha = 0.8) +
+  labs(x = "Euclidean Distances", y = "Density") +
+  ggtitle("Euclidean Distances") +
+  theme_minimal()
+```
+
+```{r manhattan, message=FALSE, warning=FALSE}
+dist_manhattan <- vegdist(normalized_df, method = "manhattan")
+dist_manhattan%>%
+  data.frame() %>% 
+  ggplot(aes(x = .)) +
+  geom_density(fill = "#F166D2", alpha = 0.8) +
+  labs(x = "Manhattan distance", y = "Density") +
+  ggtitle("Manhattan distance") +
+  theme_minimal()
+```
+```{r bray-curtis, message=FALSE, warning=FALSE}
+dist_bray <- vegdist(normalized_df, method = "bray")
+dist_bray%>%
+  data.frame() %>% 
+  ggplot(aes(x = .)) +
+  geom_density(fill = "#6E66F1", alpha = 0.8) +
+  labs(x = "Bray-Curtis distance ", y = "Density") +
+  ggtitle("Bray-Curtis distance") +
+  theme_minimal()
+```
+
+### Iterating through different clustering methods 
+```{r clustering, message=FALSE, warning=FALSE}
+perform_clustering <- function(data) {
+  distance_methods <- c("euclidean", "manhattan", "bray")
+  clustering_methods <- c("average", "complete", "ward.D2", "single")
+  results <- list()
+  for (dist_method in distance_methods) {
+    distance <- vegdist(data, method = dist_method)
+    for (clust_method in clustering_methods) {
+      hc_method <- hclust(distance, method = clust_method)
+      ph_method <- as.phylo(hc_method)
+      c_method <- cophenetic(ph_method)
+      correlation <- cor(distance, as.dist(c_method))
+      results[[paste(dist_method, clust_method, sep = "_")]] <- list(
+        "distance" = distance,
+        "hc_method" = hc_method,
+        "ph_method" = ph_method,
+        "correlation" = correlation
+      )
+    }
+  }
+  return(results)
+}
+
+correlation_calc<-perform_clustering(normalized_df)
+```
+
+Comparing different distance and clustering methods
+```{r comparison, message=FALSE, warning=FALSE}
+correlation_df <- data.frame(Distance_method = character(),
+                         Clustering_method = character(),
+                         Correlation_coefficient = numeric())
+
+for (method in names(correlation_calc)) {
+  methods <- strsplit(method, "_")[[1]]
+  correlation <- correlation_calc[[method]]$correlation
+  correlation_df <- rbind(correlation_df, data.frame(Distance_method = methods[1],
+                                             Clustering_method = methods[2],
+                                             Correlation_coefficient = correlation))
+}
+
+print(correlation_df[which.max(correlation_df$Correlation_coefficient), ])
+```
+
+Plotting all methods outputs
+```{r plots, message=FALSE, warning=FALSE}
+plots <- function(data) {
+  distance_methods <- c("euclidean", "manhattan", "bray")
+  clustering_methods <- c("average", "complete", "ward.D2", "single")
+  
+  for (dist_method in distance_methods) {
+    for (clust_method in clustering_methods) {
+      distance <- vegdist(data, method = dist_method)
+      hc_method <- hclust(distance, method = clust_method)
+      ph_method <- as.phylo(hc_method)
+      status <- factor(Golub_Merge$ALL.AML, levels = c('AML', 'ALL'))
+      colors <- ifelse(status == 'AML', '#CC17A6', '#0AA3DC')
+      plot(ph_method, type = "phylogram", main = paste("Distance:", dist_method, ", Clustering:", clust_method), cex=0.6, tip.color = colors)
+    }
+  }
+}
+
+plots(normalized_df)
+```
+
+### Although euclidean distance with average clustering seems to be the best according to correlation value, but plot-wise manhattan ward.D2 looks closer to real data - one can see clear distinction between two groups - AML and ALL. 
+
+## Bootstraping
+
+Euclidean average
+```{r eu-bs, message=FALSE, warning=FALSE}
+cl_boot_eu = pvclust(t(normalized_df), method.dist = "euclidean", method.hclust = "average", nboot = 100, parallel = T, iseed = 42)
+plot(cl_boot_eu, cex=0.5)
+pvrect(cl_boot_eu, alpha = 0.95, max.only = F)
+```
+
+Manhattan ward.D2
+```{r mnh-bs, message=FALSE, warning=FALSE}
+cl_boot_mnh = pvclust(t(normalized_df), method.dist = "manhattan", method.hclust = "ward.D2", nboot = 100, parallel = T, iseed = 42)
+plot(cl_boot_mnh, cex=0.5)
+pvrect(cl_boot_mnh, alpha = 0.95, max.only = F)
+```
+
+In conclusion Euclidean dendrogram has three main outliers - 33, 51 and 54, but all of them from AML group, and Manhattan presents more clear distribution between two main groups - AML and ALL patiens. In general both dendrograms show small clusters of two and three branches which corresponds to different factors, that are not included in this analysis (cell types for ALL patience, kind of sample tissue), and overall view of dendrogram is influenced by methods that were used (distance metrics and clustering type)
